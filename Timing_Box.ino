@@ -28,37 +28,33 @@ const int indicator = LED;
 // ----------------------------------------------------------------------------------------------
 
 // Set mode to internal timer (timer1) or external trigger (ventilator pin interrupt)
-const int ventilate = false;
+const int ventilate = true;
 
 // Set timing options (make sure all camera and shutter delays add up to less than the breath period, i.e. 500 msec)
 long rate = 500000;                                 // Cycle rate (in microsec) for free breathing (no external trigger)
 
-int initialDelay = 0;                               // Delay to appropriate point in breath (in msec)
+int initialDelay = 400;                             // Delay to appropriate point in breath (in msec)
 int shutterOpenDelay = 5;                           // Time required for shutter to open (in msec)
 int cameraPulse = 50;                               // Exposure length (in msec)
-int cameraDelay = 75;                               // Delay between exposures (in msec, only used if imagingExposures > 1, or for flat correction)
+int cameraDelay = 25;                               // Delay between exposures (in msec, only used if imagingExposures > 1, or for flat correction)
 int shutterCloseDelay = 25;                         // Delay before closing shutter (in msec)
 
+int imagingExposures = 1;                           // Number of camera triggers per breath
+int imagingRepeats = 50;                            // Number of sequential breaths for which to repeat imaging
+int imagingBlocks = 12;                             // Number of imaging blocks (should be equal to the number of elements in imagingStart)
+int imagingStart[] = {
+  0,60,120,180,240,360,480,600,840,1200,1560,1920}; // Imaging start times (in breaths; the difference between each element should be greater than repeat)
+
 int aeronebDelay = 0;                               // Aeroneb delay to appropriate point in breath (in msec)
-int aeronebPulse = 50;                              // Aeroneb pulse length
+int aeronebPulse = 15;                              // Aeroneb pulse length (msec)
+int aeronebRepeats = 180;                           // Number of sequential breaths for which to repeat aerosol delivery in each block
+int aeronebBlocks = 1;                              // Number of aeroneb blocks (should be equal to the number of elements in aeronebStart)
+int aeronebStart[] = {
+  120};                                             // Aeroneb start times (in breaths; the difference between each element should be greater than repeat)
 
 int insufflatorDelay = 25;                          // Insufflator delay to appropriate point in breath (in msec)
 int insufflatorPulse = 225;                         // Air valve open time (in msec)
-
-// Set experiment timing options
-int imagingExposures = 1;                           // Number of camera triggers per breath
-int imagingRepeats = 10;                            // Number of sequential breaths for which to repeat imaging
-int imagingBlocks = 23;                             // Number of imaging blocks (should be equal to the number of elements in imagingStart)
-int imagingStart[] = {
-  0,120,240,360,480,600,720,840,960,1080,1200,1320,1440,1560,1680,1800,1920,2040,2160,2280,2400,2520,2640};
-                                                    // Imaging start times (in breaths; the difference between each element should be greater than repeat)
-
-int aeronebRepeats = 600;                           // Number of sequential breaths for which to repeat aerosol delivery
-int aeronebBlocks = 1;                              // Number of aeroneb blocks (should be equal to the number of elements in aeronebStart)
-int aeronebStart[] = {
-  240};                                             // Aeroneb start times (in breaths; the difference between each element should be greater than repeat)
-
-int insufflatorRepeats = 3;                         // Number of sequential breaths for which to actuate insufflator
+int insufflatorRepeats = 3;                         // Number of sequential breaths for which to actuate insufflator in each block
 int insufflatorBlocks = 2;                          // Number of insufflator blocks (should be equal to the number of elements in insufflatorStart)
 int insufflatorStart[] = {
   65,125};                                          // Insufflator start times (in breaths; the difference between each element should be greater than repeat)
@@ -66,7 +62,7 @@ int insufflatorStart[] = {
 // ----------------------------------------------------------------------------------------------
 
 // Global Variables
-int mode = 3, acquire = false, aerosolise = false, insufflate = false, manualNeb = false, Rx = 1;
+int mode = 3, acquire = false, aerosolise = false, insufflate = false, Rx = 1;
 int imBlock, imStart, imStage = 1, anBlock, anStart, anStage = 1, dpiBlock, dpiStart, dpiStage = 1;
 int i, e, r, a, d;
 long elapsedTime, stageTime;
@@ -130,9 +126,8 @@ void loop()
     case 'i':
       Serial.println("Search mode on");
       e = 1;
-      imStart = 0;
       mode = 1;
-      breath = -2;              // Need to add 2 here to allow time to finish serial comms for accurate timing
+      breath = -1;                  // Need to add 1 here to allow time to finish serial comms for accurate timing
       break;
 
     case 'r':
@@ -151,7 +146,7 @@ void loop()
       dpiStart = insufflatorStart[dpiBlock];
       
       mode = 2;
-      breath = -2;
+      breath = -1;
       break;
   
    case 'a':
@@ -165,25 +160,26 @@ void loop()
       dpiBlock = insufflatorBlocks;
       
       mode = 2;
-      breath = -2;
+      breath = -1;
       break;
 
     case 's':
-      Serial.println("Stopped");
+      Serial.println("Complete");
       mode = 3;
       break;
       
     case 'n':
-      if(manualNeb) {
-        digitalWrite(aeronebOutput, LOW);
-        Serial.println("Aeroneb off");
-        manualNeb = false;
-      }
-      else {
-        digitalWrite(aeronebOutput, HIGH);
-        Serial.println("Aeroneb on 100%");
-        manualNeb = true;
-      }
+      digitalWrite(aeronebOutput, HIGH);
+      Serial.println("Aeroneb on");
+      a = aeronebRepeats;
+      anBlock = 0;
+      anStart = breath;
+      break;
+      
+    case 'm':
+      digitalWrite(aeronebOutput, LOW);
+      Serial.println("Aeroneb off");
+      anBlock = aeronebBlocks;
       break;
 
     case '0':
@@ -211,8 +207,8 @@ void loop()
   switch(mode)  {
 
   case 1: // MODE 1: ROI Search mode
-    if(breath == imStart) {
-      imStart++;
+    if(breath == 0) {
+      breath = -1;
       acquire = true;
     }
     break;
@@ -275,7 +271,7 @@ void loop()
       }
     }
     else {
-      Serial.println("Stopped");
+      Serial.println("Complete");
       mode = 3;
     } 
     break;
@@ -335,7 +331,6 @@ void loop()
         }
       }
       else imStage = 5;
-     // }
       break;
 
     case 5: // Wait for the shutter delay & close the shutter

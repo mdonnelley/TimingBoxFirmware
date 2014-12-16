@@ -1,4 +1,4 @@
-WCH_Timing_Box
+Timing_Box
 ==============
 
 Code for WCH timing box using Arduino Uno.
