@@ -21,7 +21,7 @@
 const int cameraOutput = OUT1;
 const int shutterOutput = OUT2;
 const int insufflatorOutput = OUT4;
-const int aeronebOutput = PWM1;
+const int aeronebOutput = OUT3;
 const int inspirationInput = IN1;
 const int indicator = LED;
 
