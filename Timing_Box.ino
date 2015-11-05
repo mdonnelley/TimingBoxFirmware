@@ -35,11 +35,13 @@ long rate = 500000;                                 // Cycle rate (in microsec) 
 
 int initialDelay = 400;                             // Delay to appropriate point in breath (in msec)
 int shutterOpenDelay = 5;                           // Time required for shutter to open (in msec)
-int cameraPulse = 50;                               // Exposure length (in msec)
+int cameraPulseShort = 5;                           // Short exposure length (in msec)
+int cameraPulseLong = 50;                           // Long exposure length (in msec)
 int cameraDelay = 25;                               // Delay between exposures (in msec, only used if imagingExposures > 1, or for flat correction)
 int shutterCloseDelay = 25;                         // Delay before closing shutter (in msec)
 
 int imagingExposures = 1;                           // Number of camera triggers per breath
+int imagingFlats = 20;
 int imagingRepeats = 50;                            // Number of sequential breaths for which to repeat imaging
 int imagingBlocks = 12;                             // Number of imaging blocks (should be equal to the number of elements in imagingStart)
 int imagingStart[] = {
@@ -62,7 +64,7 @@ int insufflatorStart[] = {
 // ----------------------------------------------------------------------------------------------
 
 // Global Variables
-int mode = 3, acquire = false, aerosolise = false, insufflate = false, Rx = 1;
+int mode = 3, acquire = false, aerosolise = false, insufflate = false, Rx = 1, cameraPulse;
 int imBlock, imStart, imStage = 1, anBlock, anStart, anStage = 1, dpiBlock, dpiStart, dpiStage = 1;
 int i, e, r, a, d;
 long elapsedTime, stageTime;
@@ -125,6 +127,7 @@ void loop()
 
     case 'i':
       Serial.println("Search mode on");
+      cameraPulse = cameraPulseShort;
       e = 1;
       mode = 1;
       breath = -1;                  // Need to add 1 here to allow time to finish serial comms for accurate timing
@@ -132,6 +135,7 @@ void loop()
 
     case 'r':
       Serial.println("Running Script");
+      cameraPulse = cameraPulseLong;
       e = imagingExposures;
       r = imagingRepeats;
       imBlock = 0;
@@ -151,8 +155,24 @@ void loop()
   
    case 'a':
       Serial.println("Acquiring one block");
+      cameraPulse = cameraPulseLong;
       e = imagingExposures;
       r = imagingRepeats;
+      imBlock = imagingBlocks - 1;
+      imStart = 0;
+      
+      anBlock = aeronebBlocks;  // Added to ensure the aerosol/insufflation code is never executed
+      dpiBlock = insufflatorBlocks;
+      
+      mode = 2;
+      breath = -1;
+      break;
+      
+   case 'f':
+      Serial.println("Acquiring flats / darks");
+      cameraPulse = cameraPulseLong;
+      e = imagingFlats;
+      r = 1;
       imBlock = imagingBlocks - 1;
       imStart = 0;
       
