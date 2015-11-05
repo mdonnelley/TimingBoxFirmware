@@ -1,7 +1,21 @@
 #include <TimerOne.h>
 
 // ----------------------------------------------------------------------------------------------
-
+//
+// i - ROI Search Mode
+// r - Run mode
+// a - Acquire one block
+// f - Acquire flat images (shutter stays open)
+// s - Stop
+//
+// n - Aeroneb on
+// m - Aeroneb off
+//
+// 0 - No Rx
+// 1 - Aeroneb Rx (default)
+// 2 - Insufflator Rx
+//
+// ----------------------------------------------------------------------------------------------
 // Setup timing box input BNC interrupts
 #define IN1Interrupt 0                             // Interrupt 0 is on IN1
 #define IN2Interrupt 1                             // Interrupt 1 is on IN2
@@ -401,7 +415,7 @@ void loop()
 
     switch(dpiStage)  {
 
-    case 1: // Wait until the appropriate point in the breath & activate aeroneb
+    case 1: // Wait until the appropriate point in the breath & activate insufflator
       if(elapsedTime >= insufflatorDelay)  {
         digitalWrite(insufflatorOutput, HIGH);
         dpiStage = 2;
