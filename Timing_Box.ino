@@ -4,8 +4,8 @@
 //
 // i - ROI Search Mode
 // r - Run mode
-// a - Acquire one block
-// f - Acquire flat images (shutter stays open)
+// a - Acquire one block (standard block)
+// f - Acquire flat images (short block, 1 image per breath)
 // s - Stop
 //
 // n - Aeroneb on
@@ -34,8 +34,8 @@
 // Timing box BNC to variable mappings
 const int cameraOutput = OUT1;
 const int shutterOutput = OUT2;
-const int insufflatorOutput = OUT4;
 const int aeronebOutput = OUT3;
+const int insufflatorOutput = OUT4;
 const int inspirationInput = IN1;
 const int indicator = LED;
 
@@ -47,12 +47,12 @@ const int ventilate = true;
 // Set timing options (make sure all camera and shutter delays add up to less than the breath period, i.e. 500 msec)
 long rate = 500000;                                 // Cycle rate (in microsec) for free breathing (no external trigger)
 
-int initialDelay = 400;                             // Delay to appropriate point in breath (in msec)
+int initialDelay = 425;                             // Delay to appropriate point in breath (in msec)
 int shutterOpenDelay = 5;                           // Time required for shutter to open (in msec)
 int cameraPulseShort = 5;                           // Short exposure length (in msec)
-int cameraPulseLong = 50;                           // Long exposure length (in msec)
+int cameraPulseLong = 25;                           // Long exposure length (in msec)
 int cameraDelay = 25;                               // Delay between exposures (in msec, only used if imagingExposures > 1, or for flat correction)
-int shutterCloseDelay = 25;                         // Delay before closing shutter (in msec)
+int shutterCloseDelay = 15;                         // Delay before closing shutter (in msec)
 
 int imagingExposures = 1;                           // Number of camera triggers per breath
 int imagingFlats = 20;
@@ -185,8 +185,8 @@ void loop()
    case 'f':
       Serial.println("Acquiring flats / darks");
       cameraPulse = cameraPulseLong;
-      e = imagingFlats;
-      r = 1;
+      e = 1;
+      r = imagingFlats;
       imBlock = imagingBlocks - 1;
       imStart = 0;
       
