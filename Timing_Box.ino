@@ -1,5 +1,12 @@
 #include <TimerOne.h>
 
+// Serial protocol: All communication starts with the # indicator and consists of 2 or 3 comma separated values: command (length 1), parameter (length 2) and an optional value (length 4). Examples:
+//
+// #3,61       Start search mode
+// #1,11,0400  Set initial delay to 400 msec
+// #2,16       Check the shutter close delay
+// #3,65       Stop
+
 // Setup timing box input BNC interrupts
 #define IN1Interrupt 0                             // Interrupt 0 is on IN1
 #define IN2Interrupt 1                             // Interrupt 1 is on IN2
@@ -24,9 +31,8 @@ const int indicator = LED;
 
 // ----------------------------------------------------------------------------------------------
 
-long rate = 500;                                    // Cycle rate (in msec) for free breathing (no external trigger)
-
 // Set timing options (make sure all camera and shutter delays add up to less than the breath period, i.e. 500 msec)
+int rate = 500;                                     // Cycle rate (in msec) for free breathing (no external trigger)
 int initialDelay = 425;                             // Delay to appropriate point in breath (in msec)
 int shutterOpenDelay = 5;                           // Time required for shutter to open (in msec)
 int cameraPulseShort = 5;                           // Short exposure length (in msec)
@@ -146,8 +152,14 @@ void loop()
         parameter = ((incomingByte - 48) + parameter);
         count++;
         if(count == 2) {
-          count = 0;
-          serialStage = 4;
+          if(command == 1) {
+            count = 0;
+            serialStage = 4;
+          } 
+          else if(command == 2 || command == 3)  {
+            serialStage = 0;
+            instructionComplete = true;
+          }
         }
         break;
 
@@ -174,7 +186,7 @@ void loop()
       }
     }
   }
-  
+
   // ------------------------------------------------
   // Instruction execution
   // ------------------------------------------------
@@ -187,9 +199,9 @@ void loop()
 
     switch(command)  {
 
-      // 1: rate                     Cycle rate (in msec) for free breathing (no external trigger)
-
-      // 11: initialDelay            Delay to appropriate po// in breath (in msec)
+      // 01: rate                    Cycle rate (in msec) for free breathing (no external trigger)
+      
+      // 11: initialDelay            Delay to appropriate point in breath (in msec)
       // 12: shutterOpenDelay        Time required for shutter to open (in msec)
       // 13: cameraPulseShort        Short exposure length (in msec)
       // 14: cameraPulseLong         Long exposure length (in msec)
@@ -197,12 +209,12 @@ void loop()
       // 16: shutterCloseDelay       Delay before closing shutter (in msec)
 
       // 21: imagingExposures        Number of camera triggers per breath
-      // 22: imagingFlats            Number of flat images to acquire
-      // 23: imagingRepeats          Number of sequential breaths for which to repeat imaging
+      // 22: imagingRepeats          Number of sequential breaths for which to repeat imaging
+      // 23: imagingFlats            Number of flat images to acquire
       // 24: imagingBlocks           Number of imaging blocks (should be equal to the number of elements in imagingStarts)
       // 25: imagingStarts[]         Imaging start times (in breaths; the difference between each element should be greater than repeat)
 
-      // 31: rxDelay                 Rx delay to appropriate po// in breath (in msec)
+      // 31: rxDelay                 Rx delay to appropriate point in breath (in msec)
       // 32: rxPulse                 Rx pulse length (msec)
       // 33: rxRepeats               Number of sequential breaths for which to repeat Rx delivery in each block
       // 34: rxBlocks                Number of Rx blocks (should be equal to the number of elements in rxStart)
@@ -246,11 +258,11 @@ void loop()
         break;
 
       case 22:
-        imagingFlats = value;
+        imagingRepeats = value;
         break;
 
       case 23:
-        imagingRepeats = value;
+        imagingFlats = value;
         break;
 
       case 31:
@@ -304,11 +316,11 @@ void loop()
         break;
 
       case 22:
-        sprintf(outgoing,"#%.2d,%.4d", parameter, imagingFlats);
+        sprintf(outgoing,"#%.2d,%.4d", parameter, imagingRepeats);
         break;
 
       case 23:
-        sprintf(outgoing,"#%.2d,%.4d", parameter, imagingRepeats);
+        sprintf(outgoing,"#%.2d,%.4d", parameter, imagingFlats);
         break;
 
       case 31:
@@ -365,7 +377,6 @@ void loop()
         e = 1;
         mode = 1;
         breath = -1;                  // Need to add 1 here to allow time to finish serial comms for accurate timing
-        sprintf(outgoing,"#%.2d,%.4d", parameter, 0);
         break;
 
       case 62: // Run script
@@ -446,12 +457,12 @@ void loop()
 
       }
 
-      sprintf(outgoing,"#%.2d,%.4d", parameter, 0);
+      sprintf(outgoing,"#%.2d", parameter);
       Serial.println(outgoing);
       break;
 
     default:
-      sprintf(outgoing,"#%.2d,%.4d", 0, 0);
+      sprintf(outgoing,"#00");
       Serial.println(outgoing);
 
     }
@@ -514,7 +525,8 @@ void loop()
       }
     }
     else {
-      Serial.println("Complete");
+      sprintf(outgoing,"#99");
+      Serial.println(outgoing);
       mode = 3;
     } 
     break;
@@ -612,6 +624,7 @@ void loop()
     }
   }
 }
+
 
 
 
