@@ -1,22 +1,5 @@
 #include <TimerOne.h>
 
-// ----------------------------------------------------------------------------------------------
-//
-// i - ROI Search Mode
-// r - Run mode
-// a - Acquire one block (standard block)
-// f - Acquire flat images (short block, 1 image per breath)
-// s - Toggle shutter status (use to keep shutter open permanently)
-// v - Toggle timing status (External trigger vs Internal timing)
-// x - Stop
-//
-// n - Aeroneb on
-// m - Aeroneb off
-//
-// 0 - No treatment
-// 1 - Deliver Treatment (default)
-//
-// ----------------------------------------------------------------------------------------------
 // Setup timing box input BNC interrupts
 #define IN1Interrupt 0                             // Interrupt 0 is on IN1
 #define IN2Interrupt 1                             // Interrupt 1 is on IN2
@@ -66,12 +49,14 @@ int rxRepeats = 180;                                // Number of sequential brea
 int rxBlocks = 1;                                   // Number of Rx blocks (should be equal to the number of elements in rxStart)
 int rxStarts[] = {
   120};                                             // Rx start times (in breaths; the difference between each element should be greater than repeat)
- 
+
 // ----------------------------------------------------------------------------------------------
 
 // Global Variables
-int ventilate = true, mode = 3, acquire = false, rx = false, cameraPulse, shutterStatus = LOW;
-int imBlock, imStart, imStage = 1, rxBlock, rxStart, rxStage = 1;
+boolean instructionComplete = false, acquire = false, rx = false, shutterStatus = LOW;
+int count, serialStage, command = 0, parameter = 0, value = 0;
+char incomingByte, outgoing[20];
+int mode = 3, cameraPulse, imBlock, imStart, imStage = 1, rxBlock, rxStart, rxStage = 1;
 int i, e, r, a;
 long elapsedTime, stageTime;
 
@@ -93,12 +78,10 @@ void setup()
   pinMode(inspirationInput, INPUT);
   pinMode(indicator, OUTPUT);
 
-  // Setup the interrupts 
+  // Setup the interrupts (Default is externally triggered timing)
   Timer1.initialize(rate*1000);
-  if(ventilate) 
-    attachInterrupt(IN1Interrupt, interrupt, RISING);
-  else
-    Timer1.attachInterrupt(interrupt);
+  attachInterrupt(IN1Interrupt, interrupt, RISING);
+  //  Timer1.attachInterrupt(interrupt);
 }
 
 // ----------------------------------------------------------------------------------------------
@@ -118,121 +101,363 @@ void interrupt()
 
 void loop()
 {
-  
+
   // ------------------------------------------------
   // Serial communication
   // ------------------------------------------------
 
-  if (Serial.available() > 0) {
+  // Check if the serial buffer contains data
+  if(Serial.available()) {
 
-    int serialData = Serial.read();
+    incomingByte = Serial.read();
 
-    switch(serialData) {
-      
-    case 'v':
-      ventilate = !ventilate;
-      if(ventilate) {
-        Serial.println("External trigger");
+    // Reset instruction code if # received: Indicates communication start
+    if(incomingByte == 35)  {
+
+      command = 0;         // Throw away previous command
+      parameter = 0;
+      value = 0;
+      count = 0;
+      serialStage = 1;     // Reset serialStage state machine
+
+    } 
+
+    else {
+
+      switch(serialStage)  {
+
+      case 1: // Get command
+        command = incomingByte - 48;
+        serialStage = 2;
+        break;
+
+      case 2: // Check for comma
+        if(incomingByte == 44) 
+          serialStage = 3;
+        else {
+          sprintf(outgoing,"#%.2d,%.4d", 0, 0);
+          Serial.println(outgoing);
+          serialStage = 0; // Add error notification
+        }
+        break;
+
+      case 3: // Get parameter
+        parameter *= 10;
+        parameter = ((incomingByte - 48) + parameter);
+        count++;
+        if(count == 2) {
+          count = 0;
+          serialStage = 4;
+        }
+        break;
+
+      case 4: // Check for comma
+        if(incomingByte == 44) 
+          serialStage = 5;
+        else {
+          sprintf(outgoing,"#%.2d,%.4d", 0, 0);
+          Serial.println(outgoing);
+          serialStage = 0; // Add error notification
+        }
+        break;
+
+      case 5: // Get value
+        value *= 10;
+        value = ((incomingByte - 48) + value);
+        count++;
+        if(count == 4) {
+          serialStage = 0;
+          instructionComplete = true;
+        }
+        break;
+
+      }
+    }
+  }
+  
+  // ------------------------------------------------
+  // Instruction execution
+  // ------------------------------------------------
+
+  if(instructionComplete) {
+
+    // 1: Set parameter
+    // 2: Get parameter
+    // 3: Control timing box
+
+    switch(command)  {
+
+      // 1: rate                     Cycle rate (in msec) for free breathing (no external trigger)
+
+      // 11: initialDelay            Delay to appropriate po// in breath (in msec)
+      // 12: shutterOpenDelay        Time required for shutter to open (in msec)
+      // 13: cameraPulseShort        Short exposure length (in msec)
+      // 14: cameraPulseLong         Long exposure length (in msec)
+      // 15: cameraDelay             Delay between exposures (in msec, only used if imagingExposures > 1, or for flat correction)
+      // 16: shutterCloseDelay       Delay before closing shutter (in msec)
+
+      // 21: imagingExposures        Number of camera triggers per breath
+      // 22: imagingFlats            Number of flat images to acquire
+      // 23: imagingRepeats          Number of sequential breaths for which to repeat imaging
+      // 24: imagingBlocks           Number of imaging blocks (should be equal to the number of elements in imagingStarts)
+      // 25: imagingStarts[]         Imaging start times (in breaths; the difference between each element should be greater than repeat)
+
+      // 31: rxDelay                 Rx delay to appropriate po// in breath (in msec)
+      // 32: rxPulse                 Rx pulse length (msec)
+      // 33: rxRepeats               Number of sequential breaths for which to repeat Rx delivery in each block
+      // 34: rxBlocks                Number of Rx blocks (should be equal to the number of elements in rxStart)
+      // 35: rxStarts[]              Rx start times (in breaths; the difference between each element should be greater than repeat)
+
+    case 1: // Set a parameter
+
+      switch(parameter) {
+
+      case 1:
+        rate = value;
+        Timer1.setPeriod(rate*1000);
+        break;
+
+      case 11:
+        initialDelay = value;
+        break;
+
+      case 12:
+        shutterOpenDelay = value;
+        break;
+
+      case 13:
+        cameraPulseShort = value;
+        break;
+
+      case 14:
+        cameraPulseLong = value;
+        break;
+
+      case 15:
+        cameraDelay = value;
+        break;
+
+      case 16:
+        shutterCloseDelay = value;
+        break;
+
+      case 21:
+        imagingExposures = value;
+        break;
+
+      case 22:
+        imagingFlats = value;
+        break;
+
+      case 23:
+        imagingRepeats = value;
+        break;
+
+      case 31:
+        rxDelay = value;
+        break;
+
+      case 32:
+        rxPulse = value;
+        break;
+
+      case 33:
+        rxRepeats = value;
+        break;
+
+      }
+
+    case 2: // Get a parameter
+
+      switch(parameter) {
+
+      case 1:
+        sprintf(outgoing,"#%.2d,%.4d", parameter, rate);
+        break;
+
+      case 11:
+        sprintf(outgoing,"#%.2d,%.4d", parameter, initialDelay);
+        break;
+
+      case 12:
+        sprintf(outgoing,"#%.2d,%.4d", parameter, shutterOpenDelay);
+        break;
+
+      case 13:
+        sprintf(outgoing,"#%.2d,%.4d", parameter, cameraPulseShort);
+        break;
+
+      case 14:
+        sprintf(outgoing,"#%.2d,%.4d", parameter, cameraPulseLong);
+        break;
+
+      case 15:
+        sprintf(outgoing,"#%.2d,%.4d", parameter, cameraDelay);
+        break;
+
+      case 16:
+        sprintf(outgoing,"#%.2d,%.4d", parameter, shutterCloseDelay);
+        break;
+
+      case 21:
+        sprintf(outgoing,"#%.2d,%.4d", parameter, imagingExposures);
+        break;
+
+      case 22:
+        sprintf(outgoing,"#%.2d,%.4d", parameter, imagingFlats);
+        break;
+
+      case 23:
+        sprintf(outgoing,"#%.2d,%.4d", parameter, imagingRepeats);
+        break;
+
+      case 31:
+        sprintf(outgoing,"#%.2d,%.4d", parameter, rxDelay);
+        break;
+
+      case 32:
+        sprintf(outgoing,"#%.2d,%.4d", parameter, rxPulse);
+        break;
+
+      case 33:
+        sprintf(outgoing,"#%.2d,%.4d", parameter, rxRepeats);
+        break;
+
+      default:
+        sprintf(outgoing,"#%.2d,%.4d", 0, 0);
+
+      }
+      Serial.println(outgoing);
+      break;
+
+      // 51: External trigger
+      // 52: Internal timing
+
+      // 61: Search mode on
+      // 62: Run script
+      // 63: Acquire one block
+      // 64: Acquire flats / darks
+      // 65: Stop all
+
+      // 71: Force shutter open
+      // 72: Normal shuttering
+      // 73: Treatment on manual
+      // 74: Treatment off manual
+      // 75: Schedule treatment to deliver on script run
+      // 76: Schedule treatment to NOT deliver on script run
+
+    case 3: // Control the timing box
+
+      switch(parameter) {
+
+      case 51: // External trigger
         Timer1.detachInterrupt(); 
         attachInterrupt(IN1Interrupt, interrupt, RISING);
-      }
-      else {
-        Serial.println("Internal timing");
+        break;
+
+      case 52: // Internal timing
         detachInterrupt(IN1Interrupt);
         Timer1.attachInterrupt(interrupt);
+        break;
+
+      case 61: // Search mode on
+        cameraPulse = cameraPulseShort;
+        e = 1;
+        mode = 1;
+        breath = -1;                  // Need to add 1 here to allow time to finish serial comms for accurate timing
+        sprintf(outgoing,"#%.2d,%.4d", parameter, 0);
+        break;
+
+      case 62: // Run script
+        cameraPulse = cameraPulseLong;
+        e = imagingExposures;
+        r = imagingRepeats;
+        imBlock = 0;
+        imStart = imagingStarts[imBlock];
+
+        a = rxRepeats;
+        rxBlock = 0;
+        rxStart = rxStarts[rxBlock];
+
+        mode = 2;
+        breath = -1;
+        break;
+
+      case 63: // Acquire one block
+        cameraPulse = cameraPulseLong;
+        e = imagingExposures;
+        r = imagingRepeats;
+        imBlock = imagingBlocks - 1;
+        imStart = 0;
+
+        rxBlock = rxBlocks;  // Added to ensure the aerosol/insufflation code is never executed
+
+        mode = 2;
+        breath = -1;
+        break;
+
+      case 64: // Acquire flats / darks
+        cameraPulse = cameraPulseLong;
+        e = 1;
+        r = imagingFlats;
+        imBlock = imagingBlocks - 1;
+        imStart = 0;
+
+        rxBlock = rxBlocks;  // Added to ensure the aerosol/insufflation code is never executed
+
+        mode = 2;
+        breath = -1;
+        break;
+
+      case 65: // Stop all
+        digitalWrite(rxOutput, LOW);
+        mode = 3;
+        break;
+
+      case 71: // Force shutter open
+        shutterStatus = HIGH;
+        digitalWrite(shutterOutput, shutterStatus);
+        break;
+
+      case 72: // Normal shuttering
+        shutterStatus = LOW;
+        digitalWrite(shutterOutput, shutterStatus);
+        break;
+
+      case 73: // Treatment on manual
+        digitalWrite(rxOutput, HIGH);
+        a = rxRepeats;
+        rxBlock = 0;
+        rxStart = breath;
+        break;
+
+      case 74: // Treatment off manual
+        digitalWrite(rxOutput, LOW);
+        rxBlock = rxBlocks;
+        break;
+
+      case 75: // Schedule treatment to deliver on script run
+        rx = false;
+        break;
+
+      case 76: // Schedule treatment to NOT deliver on script run
+        rx = true;
+        break;
+
       }
-      break;
-//        Timer1.setPeriod(rate*1000);  // Use this to modify the period once serial comms are written
 
-    case 'i':
-      Serial.println("Search mode on");
-      cameraPulse = cameraPulseShort;
-      e = 1;
-      mode = 1;
-      breath = -1;                  // Need to add 1 here to allow time to finish serial comms for accurate timing
+      sprintf(outgoing,"#%.2d,%.4d", parameter, 0);
+      Serial.println(outgoing);
       break;
 
-    case 'r':
-      Serial.println("Running Script");
-      cameraPulse = cameraPulseLong;
-      e = imagingExposures;
-      r = imagingRepeats;
-      imBlock = 0;
-      imStart = imagingStarts[imBlock];
-      
-      a = rxRepeats;
-      rxBlock = 0;
-      rxStart = rxStarts[rxBlock];
-      
-      mode = 2;
-      breath = -1;
-      break;
-  
-   case 'a':
-      Serial.println("Acquiring one block");
-      cameraPulse = cameraPulseLong;
-      e = imagingExposures;
-      r = imagingRepeats;
-      imBlock = imagingBlocks - 1;
-      imStart = 0;
-      
-      rxBlock = rxBlocks;  // Added to ensure the aerosol/insufflation code is never executed
-      
-      mode = 2;
-      breath = -1;
-      break;
-      
-   case 'f':
-      Serial.println("Acquiring flats / darks");
-      cameraPulse = cameraPulseLong;
-      e = 1;
-      r = imagingFlats;
-      imBlock = imagingBlocks - 1;
-      imStart = 0;
-      
-      rxBlock = rxBlocks;  // Added to ensure the aerosol/insufflation code is never executed
-      
-      mode = 2;
-      breath = -1;
-      break;
+    default:
+      sprintf(outgoing,"#%.2d,%.4d", 0, 0);
+      Serial.println(outgoing);
 
-    case 's':
-      shutterStatus = !shutterStatus;
-      digitalWrite(shutterOutput, shutterStatus);
-      Serial.println("Shutter status toggled");
-      break;
-      
-    case 'x':
-      digitalWrite(rxOutput, LOW);
-      Serial.println("Complete");
-      mode = 3;
-      break;
-      
-    case 'n':
-      digitalWrite(rxOutput, HIGH);
-      Serial.println("Treatment on");
-      a = rxRepeats;
-      rxBlock = 0;
-      rxStart = breath;
-      break;
-      
-    case 'm':
-      digitalWrite(rxOutput, LOW);
-      Serial.println("Treatment off");
-      rxBlock = rxBlocks;
-      break;
-
-    case '0':
-      rx = 0;
-      Serial.println("No Rx selected");
-      break;
-
-    case '1':
-      rx = 1;
-      Serial.println("Rx selected");
-      break;
-      
     }
+
+    instructionComplete = false;
+
   }
 
   // ------------------------------------------------
@@ -262,13 +487,13 @@ void loop()
           imStart = imagingStarts[imBlock];
         }
       }
-      
+
       switch(rx) {
-        
+
       case 0: // No Rx
         digitalWrite(rxOutput, LOW);
         break;
-        
+
       case 1: // Rx
         if(rxBlock < rxBlocks) {
           if(breath == rxStart) {
@@ -285,7 +510,7 @@ void loop()
           }
         }
         break;
-           
+
       }
     }
     else {
@@ -359,7 +584,7 @@ void loop()
 
     }
   }
-  
+
   // ------------------------------------------------
   // Treatment state machine
   // ------------------------------------------------
@@ -376,7 +601,7 @@ void loop()
         rxStage = 2;
       }
       break;
-        
+
     case 2: // Wait for the delivery time
       if(elapsedTime >= rxDelay + rxPulse)  {
         digitalWrite(rxOutput, LOW);
@@ -387,6 +612,8 @@ void loop()
     }
   }
 }
+
+
 
 
 
