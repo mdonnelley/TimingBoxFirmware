@@ -23,7 +23,7 @@
 #define LED 13
 
 // Timing box BNC to variable mappings
-const int cameraOutput = OUT1;
+const int cameraOutput = OUT4; // Changed OUT1 to OUT4 due to bent BNC connector 
 const int shutterOutput = OUT2;
 const int rxOutput = OUT3;
 const int inspirationInput = IN1;
@@ -32,11 +32,10 @@ const int indicator = LED;
 // ----------------------------------------------------------------------------------------------
 
 // Set timing options (make sure all camera and shutter delays add up to less than the breath period, i.e. 500 msec)
-int rate = 500;                                     // Cycle rate (in msec) for free breathing (no external trigger)
+long rate = 500;                                     // Cycle rate (in msec) for free breathing (no external trigger)
 int initialDelay = 425;                             // Delay to appropriate point in breath (in msec)
 int shutterOpenDelay = 5;                           // Time required for shutter to open (in msec)
-int cameraPulseShort = 5;                           // Short exposure length (in msec)
-int cameraPulseLong = 25;                           // Long exposure length (in msec)
+int cameraPulse = 25;                           // Long exposure length (in msec)
 int cameraDelay = 25;                               // Delay between exposures (in msec, only used if imagingExposures > 1, or for flat correction)
 int shutterCloseDelay = 15;                         // Delay before closing shutter (in msec)
 
@@ -62,7 +61,7 @@ int rxStarts[] = {
 boolean instructionComplete = false, acquire = false, rx = false, shutterStatus = LOW;
 int count, serialStage, command = 0, parameter = 0, value = 0;
 char incomingByte, outgoing[20];
-int mode = 3, cameraPulse, imBlock, imStart, imStage = 1, rxBlock, rxStart, rxStage = 1;
+int mode = 3, imBlock, imStart, imStage = 1, rxBlock, rxStart, rxStage = 1;
 int i, e, r, a;
 long elapsedTime, stageTime;
 
@@ -203,10 +202,9 @@ void loop()
       
       // 11: initialDelay            Delay to appropriate point in breath (in msec)
       // 12: shutterOpenDelay        Time required for shutter to open (in msec)
-      // 13: cameraPulseShort        Short exposure length (in msec)
-      // 14: cameraPulseLong         Long exposure length (in msec)
-      // 15: cameraDelay             Delay between exposures (in msec, only used if imagingExposures > 1, or for flat correction)
-      // 16: shutterCloseDelay       Delay before closing shutter (in msec)
+      // 13: cameraPulse             Long exposure length (in msec)
+      // 14: cameraDelay             Delay between exposures (in msec, only used if imagingExposures > 1, or for flat correction)
+      // 15: shutterCloseDelay       Delay before closing shutter (in msec)
 
       // 21: imagingExposures        Number of camera triggers per breath
       // 22: imagingRepeats          Number of sequential breaths for which to repeat imaging
@@ -238,18 +236,14 @@ void loop()
         break;
 
       case 13:
-        cameraPulseShort = value;
+        cameraPulse = value;
         break;
 
       case 14:
-        cameraPulseLong = value;
-        break;
-
-      case 15:
         cameraDelay = value;
         break;
 
-      case 16:
+      case 15:
         shutterCloseDelay = value;
         break;
 
@@ -296,18 +290,14 @@ void loop()
         break;
 
       case 13:
-        sprintf(outgoing,"#%.2d,%.4d", parameter, cameraPulseShort);
+        sprintf(outgoing,"#%.2d,%.4d", parameter, cameraPulse);
         break;
 
       case 14:
-        sprintf(outgoing,"#%.2d,%.4d", parameter, cameraPulseLong);
-        break;
-
-      case 15:
         sprintf(outgoing,"#%.2d,%.4d", parameter, cameraDelay);
         break;
 
-      case 16:
+      case 15:
         sprintf(outgoing,"#%.2d,%.4d", parameter, shutterCloseDelay);
         break;
 
@@ -373,14 +363,12 @@ void loop()
         break;
 
       case 61: // Search mode on
-        cameraPulse = cameraPulseShort;
         e = 1;
         mode = 1;
         breath = -1;                  // Need to add 1 here to allow time to finish serial comms for accurate timing
         break;
 
       case 62: // Run script
-        cameraPulse = cameraPulseLong;
         e = imagingExposures;
         r = imagingRepeats;
         imBlock = 0;
@@ -395,7 +383,6 @@ void loop()
         break;
 
       case 63: // Acquire one block
-        cameraPulse = cameraPulseLong;
         e = imagingExposures;
         r = imagingRepeats;
         imBlock = imagingBlocks - 1;
@@ -408,7 +395,6 @@ void loop()
         break;
 
       case 64: // Acquire flats / darks
-        cameraPulse = cameraPulseLong;
         e = 1;
         r = imagingFlats;
         imBlock = imagingBlocks - 1;
