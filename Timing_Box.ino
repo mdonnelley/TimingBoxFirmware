@@ -34,7 +34,7 @@ int imagingFlats = 20;
 int imagingRepeats = 50;                            // Number of sequential breaths for which to repeat imaging
 int imagingBlocks = 12;                             // Number of imaging blocks (should be equal to the number of elements in imagingStarts)
 int imagingStarts[100] = {
-  0, 60, 120, 180, 240, 360, 480, 600, 840, 1200, 1560, 1920}; // Imaging start times (in breaths; the difference between each element should be greater than repeat)
+  0,60,120,180,240,360,480,600,840,1200,1560,1920}; // Imaging start times (in breaths; the difference between each element should be greater than repeat)
 
 // Set treatment options
 int rxDelay = 0;                                    // Rx delay to appropriate point in breath (in msec)
@@ -171,6 +171,10 @@ void loop()
   if (instructionComplete) {
 
     switch (serialParameters[0]) {
+
+      // 0000: Do nothing - Use to check serial connection successful
+      case 0:
+        break;
 
       // 0001: rate - Cycle rate (in msec) for free breathing (no external trigger)
       case 1:
@@ -341,10 +345,6 @@ void loop()
         rx = false;
         break;
 
-      // 0099: Do nothing: Use to check box active / run complete
-      case 99:
-        break;
-
     }
 
     sprintf(outgoing, "#%.4d", serialParameters[0]);
@@ -403,7 +403,7 @@ void loop()
         else digitalWrite(rxOutput, LOW);
       }
       else {
-        sprintf(outgoing, "#99");
+        sprintf(outgoing, "#0099");
         Serial.println(outgoing);
         mode = 3;
       }
