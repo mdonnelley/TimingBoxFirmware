@@ -12,11 +12,12 @@
 #define LED 13
 
 // Timing box BNC to variable mappings
-const int cameraOutput = OUT1;
-const int shutterOutput = OUT2;
-const int rxOutput = OUT3;                          // Set to OUT3 for Aeroneb
-const int inspirationInput = IN1;
-const int indicator = LED;
+const int cameraOutput = OUT1;                      // Camera
+const int shutterOutput = OUT2;                     // Sutter
+const int rx1Output = OUT3;                         // Aeroneb
+const int rx2Output = OUT4;                         // Pneumatic valve
+const int inspirationInput = IN1;                   // Ventilator input
+const int indicator = LED;                          // LED indicator
 
 // ----------------------------------------------------------------------------------------------
 
@@ -34,29 +35,37 @@ int imagingFlats = 20;
 int imagingRepeats = 50;                            // Number of sequential breaths for which to repeat imaging
 int imagingBlocks = 12;                             // Number of imaging blocks (should be equal to the number of elements in imagingStarts)
 int imagingStarts[100] = {
-  0,60,120,180,240,360,480,600,840,1200,1560,1920}; // Imaging start times (in breaths; the difference between each element should be greater than repeat)
+  0, 60, 120, 180, 240, 360, 480, 600, 840, 1200, 1560, 1920
+};                                                  // Imaging start times (in breaths; the difference between each element should be greater than repeat)
 
 // Set treatment options
-int rxDelay = 0;                                    // Rx delay to appropriate point in breath (in msec)
-int rxPulse = 15;                                   // Rx pulse length (msec)
-int rxRepeats = 180;                                // Number of sequential breaths for which to repeat Rx delivery in each block
-int rxBlocks = 1;                                   // Number of Rx blocks (should be equal to the number of elements in rxStart)
-int rxStarts[100] = {
-  120
-};                                             // Rx start times (in breaths; the difference between each element should be greater than repeat)
+int rx1Delay = 0, rx2Delay = 0;                     // Rx delay to appropriate point in breath (in msec)
+int rx1Pulse = 15, rx2Pulse = 50;                   // Rx pulse length (msec)
+int rx1Repeats = 180, rx2Repeats = 1;               // Number of sequential breaths for which to repeat Rx delivery in each block
+int rx1Blocks = 1, rx2Blocks = 1;                   // Number of Rx blocks (should be equal to the number of elements in rx1Start)
+int rx1Starts[100] = {120}, rx2Starts[100] = {10};  // Rx start times (in breaths; the difference between each element should be greater than repeat)
 
 // ----------------------------------------------------------------------------------------------
 
-// Global Variables
-boolean instructionComplete = false, acquire = false, rx = true, rxActive = false, shutterStatus = LOW;
-int byteCount, arrayCount, serialElement = 0, serialLength = 0, serialParameters[100], serialStage = 0;
-char incomingByte, outgoing[20];
-int mode = 3, imBlock, imStart, imStage = 1, rxBlock, rxStart, rxStage = 1;
-int i, e, r, a;
-long elapsedTime, stageTime;
-
+// Timing variables
 volatile int breath;
 volatile unsigned long inspTime;
+long elapsedTime;
+
+// Serial communication & instruction execution variables
+char incomingByte, outgoing[20];
+int byteCount, arrayCount, serialElement = 0, serialLength = 0, serialParameters[100], serialStage = 0;
+boolean instructionComplete = false;
+
+// Image acquisition state machine variables
+boolean acquire = false, shutterStatus = LOW;
+int imBlock, imStart, imStage = 1;
+int mode = 3, i, e, r, a1, a2;
+long stageTime;
+
+// Treatment state machine variables
+boolean rx1Deliver = true, rx1Active = false, rx2Deliver = true, rx2Active = false;
+int rx1Block, rx1Start, rx1Stage = 1, rx2Block, rx2Start, rx2Stage = 1;
 
 // ----------------------------------------------------------------------------------------------
 
@@ -69,7 +78,8 @@ void setup()
   // Setup the Arduino pins
   pinMode(cameraOutput, OUTPUT);
   pinMode(shutterOutput, OUTPUT);
-  pinMode(rxOutput, OUTPUT);
+  pinMode(rx1Output, OUTPUT);
+  pinMode(rx2Output, OUTPUT);
   pinMode(indicator, OUTPUT);
   pinMode(inspirationInput, INPUT_PULLUP);
 
@@ -176,173 +186,236 @@ void loop()
       case 0:
         break;
 
-      // 0001: rate - Cycle rate (in msec) for free breathing (no external trigger)
-      case 1:
+      // --------------- CHECKBOXES ---------------
+
+      // 0010: Switch between internal and external trigger
+      case 10:
+        if (serialParameters[1]) {
+          detachInterrupt(digitalPinToInterrupt(inspirationInput));
+          Timer1.attachInterrupt(interrupt);
+        }
+        else {
+          Timer1.detachInterrupt();
+          attachInterrupt(digitalPinToInterrupt(inspirationInput), interrupt, RISING);
+        }
+        break;
+
+      // 0011: Force shutter open / normal shuttering
+      case 11: // Force shutter open
+        if (serialParameters[1]) {
+          shutterStatus = HIGH;
+          digitalWrite(shutterOutput, shutterStatus);
+        }
+        else {
+          shutterStatus = LOW;
+          digitalWrite(shutterOutput, shutterStatus);
+        }
+        break;
+
+      // 0012: Rx1 on/off manual
+      case 12:
+        if (serialParameters[1]) {
+          digitalWrite(rx1Output, HIGH);
+          a1 = rx1Repeats;
+          rx1Block = 0;
+          rx1Start = breath;
+        }
+        else {
+          digitalWrite(rx1Output, LOW);
+          rx1Block = rx1Blocks;
+        }
+        break;
+
+      // 0013: Schedule Rx1 to deliver on script run
+      case 13:
+        if (serialParameters[1]) rx1Deliver = true;
+        else rx1Deliver = false;
+        break;
+
+      // 0014: Rx2 on/off manual
+      case 14:
+        if (serialParameters[1]) {
+          digitalWrite(rx2Output, HIGH);
+          a2 = rx2Repeats;
+          rx2Block = 0;
+          rx2Start = breath;
+        }
+        else {
+          digitalWrite(rx2Output, LOW);
+          rx2Block = rx2Blocks;
+        }
+        break;
+
+      // 0015: Schedule Rx2 to deliver on script run
+      case 15:
+        if (serialParameters[1]) rx2Deliver = true;
+        else rx2Deliver = false;
+        break;
+
+      // --------------- NUMERIC UP/DOWN BOXES ---------------
+
+      // 0020: rate - Cycle rate (in msec) for free breathing (no external trigger)
+      case 20:
         rate = serialParameters[1];
         Timer1.setPeriod(rate * 1000);
         break;
 
-      // 0011: initialDelay - Delay to appropriate point in breath (in msec)
-      case 11:
+      // 0021: initialDelay - Delay to appropriate point in breath (in msec)
+      case 21:
         initialDelay = serialParameters[1];
         break;
 
-      // 0012: shutterOpenDelay - Time required for shutter to open (in msec)
-      case 12:
+      // 0022: shutterOpenDelay - Time required for shutter to open (in msec)
+      case 22:
         shutterOpenDelay = serialParameters[1];
         break;
 
-      // 0013: cameraPulse - Exposure length (in msec)
-      case 13:
+      // 0023: cameraPulse - Exposure length (in msec)
+      case 23:
         cameraPulse = serialParameters[1];
         break;
 
-      // 0014: cameraDelay - Delay between exposures (in msec, only used if imagingExposures > 1)
-      case 14:
+      // 0024: cameraDelay - Delay between exposures (in msec, only used if imagingExposures > 1)
+      case 24:
         cameraDelay = serialParameters[1];
         break;
 
-      // 0015: shutterCloseDelay - Delay before closing shutter (in msec)
-      case 15:
+      // 0025: shutterCloseDelay - Delay before closing shutter (in msec)
+      case 25:
         shutterCloseDelay = serialParameters[1];
         break;
 
-      // 0021: imagingExposures - Number of camera triggers per breath
-      case 21:
+      // 0026: imagingExposures - Number of camera triggers per breath
+      case 26:
         imagingExposures = serialParameters[1];
         break;
 
-      // 0022: imagingRepeats - Number of sequential breaths for which to repeat imaging
-      case 22:
+      // 0027: imagingRepeats - Number of sequential breaths for which to repeat imaging
+      case 27:
         imagingRepeats = serialParameters[1];
         break;
 
-      // 0023: imagingFlats - Number of flat images to acquire
-      case 23:
+      // 0028: imagingFlats - Number of flat images to acquire
+      case 28:
         imagingFlats = serialParameters[1];
         break;
 
-      // 0024: imagingStarts[] - Imaging start times (in breaths; the difference between each element should be greater than repeat)
-      case 24:
+      // 0029: rx1Delay - Rx delay to appropriate point in breath (in msec)
+      case 29:
+        rx1Delay = serialParameters[1];
+        break;
+
+      // 0030: rx1Pulse - Rx pulse length (msec)
+      case 30:
+        rx1Pulse = serialParameters[1];
+        break;
+
+      // 0031: rx1Repeats - Number of sequential breaths for which to repeat Rx delivery in each block
+      case 31:
+        rx1Repeats = serialParameters[1];
+        break;
+
+      // 0032: rx2Delay - Rx delay to appropriate point in breath (in msec)
+      case 32:
+        rx2Delay = serialParameters[1];
+        break;
+
+      // 0033: rx2Pulse - Rx pulse length (msec)
+      case 33:
+        rx2Pulse = serialParameters[1];
+        break;
+
+      // 0034: rx2Repeats - Number of sequential breaths for which to repeat Rx delivery in each block
+      case 34:
+        rx2Repeats = serialParameters[1];
+        break;
+
+      // --------------- TEXT BOXES ---------------
+
+      // 0040: imagingStarts[] - Imaging start times (in breaths; the difference between each element should be greater than repeat)
+      case 40:
         imagingBlocks = serialLength - 1;
         for (arrayCount = 0; arrayCount < imagingBlocks; arrayCount++)  imagingStarts[arrayCount] = serialParameters[arrayCount + 1];
         break;
 
-      // 0031: rxDelay - Rx delay to appropriate point in breath (in msec)
-      case 31:
-        rxDelay = serialParameters[1];
+      // 0041: rx1Starts[] - Rx start times (in breaths; the difference between each element should be greater than repeat)
+      case 41:
+        rx1Blocks = serialLength - 1;
+        for (arrayCount = 0; arrayCount < rx1Blocks; arrayCount++)  rx1Starts[arrayCount] = serialParameters[arrayCount + 1];
         break;
 
-      // 0032: rxPulse - Rx pulse length (msec)
-      case 32:
-        rxPulse = serialParameters[1];
+      // 0042: rx2Starts[] - Rx start times (in breaths; the difference between each element should be greater than repeat)
+      case 42:
+        rx2Blocks = serialLength - 1;
+        for (arrayCount = 0; arrayCount < rx2Blocks; arrayCount++)  rx2Starts[arrayCount] = serialParameters[arrayCount + 1];
         break;
 
-      // 0033: rxRepeats - Number of sequential breaths for which to repeat Rx delivery in each block
-      case 33:
-        rxRepeats = serialParameters[1];
-        break;
+      // --------------- BUTTONS ---------------
 
-      // 0034: rxStarts[] - Rx start times (in breaths; the difference between each element should be greater than repeat)
-      case 34:
-        rxBlocks = serialLength - 1;
-        for (arrayCount = 0; arrayCount < rxBlocks; arrayCount++)  rxStarts[arrayCount] = serialParameters[arrayCount + 1];
-        break;
-
-      // 0051: External trigger - Switch to external (ie ventilator) trigger
-      case 51:
-        Timer1.detachInterrupt();
-        attachInterrupt(digitalPinToInterrupt(inspirationInput), interrupt, RISING);
-        break;
-
-      // 0052: Internal timing - Use internal timing
-      case 52:
-        detachInterrupt(digitalPinToInterrupt(inspirationInput));
-        Timer1.attachInterrupt(interrupt);
-        break;
-
-      // Search mode on
-      case 61:
+      // Search mode
+      case 50:
         e = 1;
         mode = 1;
         breath = -1;
         break;
 
-      // Run script
-      case 62:
-        e = imagingExposures;
-        r = imagingRepeats;
-        imBlock = 0;
-        imStart = imagingStarts[imBlock];
-        a = rxRepeats;
-        rxBlock = 0;
-        rxStart = rxStarts[rxBlock];
+      // One shot
+      case 51:
+        e = 1;
+        r = 1;
+        imBlock = imagingBlocks - 1;
+        imStart = 0;
+        rx1Block = rx1Blocks;  // Added to ensure the aerosol/insufflation code is never executed
+        rx2Block = rx2Blocks;  // Added to ensure the aerosol/insufflation code is never executed
         mode = 2;
         breath = -1;
         break;
 
-      // Acquire one block
-      case 63:
+      // One block
+      case 52:
         e = imagingExposures;
         r = imagingRepeats;
         imBlock = imagingBlocks - 1;
         imStart = 0;
-        rxBlock = rxBlocks;  // Added to ensure the aerosol/insufflation code is never executed
+        rx1Block = rx1Blocks;
+        rx2Block = rx2Blocks;
+        mode = 2;
+        breath = -1;
+        break;
+
+      // Run script
+      case 53:
+        e = imagingExposures;
+        r = imagingRepeats;
+        imBlock = 0;
+        imStart = imagingStarts[imBlock];
+        a1 = rx1Repeats;
+        a2 = rx2Repeats;
+        rx1Block = 0;
+        rx1Start = rx1Starts[rx1Block];
+        rx2Block = 0;
+        rx2Start = rx2Starts[rx2Block];
         mode = 2;
         breath = -1;
         break;
 
       // Acquire flats / darks
-      case 64:
+      case 54:
         e = 1;
         r = imagingFlats;
         imBlock = imagingBlocks - 1;
         imStart = 0;
-        rxBlock = rxBlocks;  // Added to ensure the aerosol/insufflation code is never executed
+        rx1Block = rx1Blocks;
+        rx2Block = rx2Blocks;
         mode = 2;
         breath = -1;
         break;
 
       // Stop all
-      case 65:
-        digitalWrite(rxOutput, LOW);
+      case 55:
+        digitalWrite(rx1Output, LOW);
+        digitalWrite(rx2Output, LOW);
         mode = 3;
-        break;
-
-      // 0071: Force shutter open - Keep the shutter open
-      case 71: // Force shutter open
-        shutterStatus = HIGH;
-        digitalWrite(shutterOutput, shutterStatus);
-        break;
-
-      // 0072: Normal shuttering - Return to normal shutter operation
-      case 72:
-        shutterStatus = LOW;
-        digitalWrite(shutterOutput, shutterStatus);
-        break;
-
-      // 0073: Treatment on manual
-      case 73:
-        digitalWrite(rxOutput, HIGH);
-        a = rxRepeats;
-        rxBlock = 0;
-        rxStart = breath;
-        break;
-
-      // 0074: Treatment off manual
-      case 74:
-        digitalWrite(rxOutput, LOW);
-        rxBlock = rxBlocks;
-        break;
-
-      // 0075: Schedule treatment to deliver on script run
-      case 75:
-        rx = true;
-        break;
-
-      // 0076: Schedule treatment to NOT deliver on script run
-      case 76:
-        rx = false;
         break;
 
     }
@@ -384,23 +457,41 @@ void loop()
           }
         }
 
-        if (rx) {
-          if (rxBlock < rxBlocks) {
-            if (breath == rxStart) {
-              rxActive = true;                       // Start treatment state machine
-              if (a > 1) {
-                a--;
-                rxStart++;
+        if (rx1Deliver) {
+          if (rx1Block < rx1Blocks) {
+            if (breath == rx1Start) {
+              rx1Active = true;                       // Start Rx1 state machine
+              if (a1 > 1) {
+                a1--;
+                rx1Start++;
               }
               else {
-                rxBlock++;
-                a = rxRepeats;
-                rxStart = rxStarts[rxBlock];
+                rx1Block++;
+                a1 = rx1Repeats;
+                rx1Start = rx1Starts[rx1Block];
               }
             }
           }
         }
-        else digitalWrite(rxOutput, LOW);
+        else digitalWrite(rx1Output, LOW);
+
+        if (rx2Deliver) {
+          if (rx2Block < rx2Blocks) {
+            if (breath == rx2Start) {
+              rx2Active = true;                       // Start Rx2 state machine
+              if (a2 > 1) {
+                a2--;
+                rx2Start++;
+              }
+              else {
+                rx2Block++;
+                a2 = rx2Repeats;
+                rx2Start = rx2Starts[rx2Block];
+              }
+            }
+          }
+        }
+        else digitalWrite(rx2Output, LOW);
       }
       else {
         sprintf(outgoing, "#0099");
@@ -481,29 +572,58 @@ void loop()
   }
 
   // ------------------------------------------------
-  // Treatment state machine
+  // Treatment 1 state machine
   // ------------------------------------------------
 
-  if (rxActive) {
+  if (rx1Active) {
 
     elapsedTime = millis() - inspTime;
 
-    switch (rxStage)  {
+    switch (rx1Stage)  {
 
       // Wait until the appropriate point in the breath & activate
       case 1:
-        if (elapsedTime >= rxDelay)  {
-          digitalWrite(rxOutput, HIGH);
-          rxStage = 2;
+        if (elapsedTime >= rx1Delay)  {
+          digitalWrite(rx1Output, HIGH);
+          rx1Stage = 2;
         }
         break;
 
       // Wait for the delivery time
       case 2:
-        if (elapsedTime >= rxDelay + rxPulse)  {
-          digitalWrite(rxOutput, LOW);
-          rxStage = 1;
-          rxActive = false;
+        if (elapsedTime >= rx1Delay + rx1Pulse)  {
+          digitalWrite(rx1Output, LOW);
+          rx1Stage = 1;
+          rx1Active = false;
+        }
+        break;
+    }
+  }
+
+  // ------------------------------------------------
+  // Treatment 2 state machine
+  // ------------------------------------------------
+
+  if (rx2Active) {
+
+    elapsedTime = millis() - inspTime;
+
+    switch (rx2Stage)  {
+
+      // Wait until the appropriate point in the breath & activate
+      case 1:
+        if (elapsedTime >= rx2Delay)  {
+          digitalWrite(rx2Output, HIGH);
+          rx2Stage = 2;
+        }
+        break;
+
+      // Wait for the delivery time
+      case 2:
+        if (elapsedTime >= rx2Delay + rx2Pulse)  {
+          digitalWrite(rx2Output, LOW);
+          rx2Stage = 1;
+          rx2Active = false;
         }
         break;
     }
