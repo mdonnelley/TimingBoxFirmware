@@ -23,11 +23,12 @@ const int indicator = LED;                          // LED indicator
 
 // Set timing options (make sure all camera and shutter delays add up to less than the breath period, i.e. 500 msec)
 long rate = 500;                                    // Cycle rate (in msec) for free breathing (no external trigger)
+int shutterMode = 0;                                // Set shutter mode to breath (default), image, or block
 int initialDelay = 425;                             // Delay to appropriate point in breath (in msec)
 int shutterOpenDelay = 5;                           // Time required for shutter to open (in msec)
 int cameraPulse = 25;                               // Long exposure length (in msec)
 int cameraDelay = 25;                               // Delay between exposures (in msec, only used if imagingExposures > 1, or for flat correction)
-int shutterCloseDelay = 15;                         // Delay before closing shutter (in msec)
+int shutterCloseDelay = 15;                         // Delay before closing shutter (in msec)                              
 
 // Set block repeat options
 int imagingExposures = 1;                           // Number of camera triggers per breath
@@ -137,7 +138,7 @@ void loop()
         serialLength = 0;
         serialElement = 0;
         memset(serialParameters, 0, sizeof(serialParameters));  // Reset array to zero
-        if (incomingByte == 35) serialStage = 1;                // Start serialStage state machine
+        if (incomingByte == 35) serialStage = 1;                // If # received then start serialStage state machine
         break;
 
       // Get serialLength to determine how many extra values to read
@@ -255,6 +256,7 @@ void loop()
       // --------------- NUMERIC UP/DOWN BOXES ---------------
 
       // 0020: rate - Cycle rate (in msec) for free breathing (no external trigger)
+      // Note that the maximum cycle length is 8388.608mS (8.3 seconds)
       case 20:
         rate = serialParameters[1];
         Timer1.setPeriod(rate * 1000);
@@ -350,6 +352,13 @@ void loop()
         for (arrayCount = 0; arrayCount < rx2Blocks; arrayCount++)  rx2Starts[arrayCount] = serialParameters[arrayCount + 1];
         break;
 
+      // --------------- COMBO BOXES ---------------
+
+      // 0045: shutterMode - Set shutter mode to breath (default), image or block
+      case 45:
+        shutterMode = serialParameters[1];
+        break;
+
       // --------------- BUTTONS ---------------
 
       // Search mode
@@ -413,8 +422,13 @@ void loop()
 
       // Stop all
       case 55:
+        if (!shutterStatus) digitalWrite(shutterOutput, LOW);
         digitalWrite(rx1Output, LOW);
         digitalWrite(rx2Output, LOW);
+        digitalWrite(cameraOutput, LOW);
+        digitalWrite(indicator, LOW);
+        imStage = 1;
+        acquire = false;
         mode = 3;
         break;
 
@@ -514,60 +528,179 @@ void loop()
 
     elapsedTime = millis() - inspTime;
 
-    switch (imStage)  {
+    // Shutter open for breath
+    if(mode == 1 || shutterMode == 0)  {
 
-      // Wait until the appropriate point in the breath & open the shutter
-      case 1:
-        if (elapsedTime >= initialDelay)  {
-          digitalWrite(shutterOutput, HIGH);
-          stageTime = initialDelay;
-          imStage = 2;
-        }
-        break;
-
-      // Wait for the shutter to open & start the camera trigger
-      case 2:
-        if (elapsedTime >= shutterOpenDelay + stageTime)  {
-          digitalWrite(cameraOutput, HIGH);
-          digitalWrite(indicator, HIGH);
-          stageTime += shutterOpenDelay;
-          imStage = 3;
-          i = 1;
-        }
-        break;
-
-      // Wait for the camera exposure length & end the camera trigger
-      case 3:
-        if (elapsedTime >= cameraPulse + stageTime)  {
-          digitalWrite(cameraOutput, LOW);
-          digitalWrite(indicator, LOW);
-          stageTime += cameraPulse;
-          imStage = 4;
-        }
-        break;
-
-      // Repeat for the required number of exposures
-      case 4:
-        if (i < e) {
-          if (elapsedTime >= cameraDelay + stageTime)  {
+      switch (imStage)  {
+  
+        // Wait until the appropriate point in the breath & open the shutter
+        case 1:
+          if (elapsedTime >= initialDelay)  {
+            digitalWrite(shutterOutput, HIGH);
+            stageTime = initialDelay;
+            i = 1;
+            imStage = 2;
+          }
+          break;
+  
+        // Wait for the shutter to open & start the camera trigger
+        case 2:
+          if (elapsedTime >= stageTime + shutterOpenDelay)  {
             digitalWrite(cameraOutput, HIGH);
             digitalWrite(indicator, HIGH);
-            stageTime += cameraDelay;
+            stageTime += shutterOpenDelay;
             imStage = 3;
-            i++;
           }
-        }
-        else imStage = 5;
-        break;
+          break;
+  
+        // Wait for the camera exposure length & end the camera trigger
+        case 3:
+          if (elapsedTime >= stageTime + cameraPulse)  {
+            digitalWrite(cameraOutput, LOW);
+            digitalWrite(indicator, LOW);
+            stageTime += cameraPulse;
+            imStage = 4;
+          }
+          break;
+  
+        // Repeat for the required number of exposures
+        case 4:
+          if (i < e) {
+            if (elapsedTime >= stageTime + cameraDelay)  {
+              digitalWrite(cameraOutput, HIGH);
+              digitalWrite(indicator, HIGH);
+              stageTime += cameraDelay;
+              imStage = 3;
+              i++;
+            }
+          }
+          else imStage = 5;
+          break;
+  
+        case 5: // Wait for the shutter delay & close the shutter
+          if (elapsedTime >= stageTime + shutterCloseDelay)  {
+            if (!shutterStatus) digitalWrite(shutterOutput, LOW);
+            imStage = 1;
+            acquire = false;
+          }
+          break;
+  
+      }
+    }
 
-      case 5: // Wait for the shutter delay & close the shutter
-        if (elapsedTime >= shutterCloseDelay + stageTime)  {
-          if (!shutterStatus) digitalWrite(shutterOutput, LOW);
-          imStage = 1;
-          acquire = false;
-        }
-        break;
+    // Shutter open for image
+    else if(mode != 1 && shutterMode == 1) {
 
+      switch (imStage)  {
+  
+        // Wait until the appropriate point in the breath & open the shutter
+        case 1:
+          if (elapsedTime >= initialDelay)  {
+            digitalWrite(shutterOutput, HIGH);
+            stageTime = initialDelay;
+            i = 1;
+            imStage = 2;
+          }
+          break;
+  
+        // Wait for the shutter to open & start the camera trigger
+        case 2:
+          if (elapsedTime >= stageTime + shutterOpenDelay)  {
+            digitalWrite(cameraOutput, HIGH);
+            digitalWrite(indicator, HIGH);
+            stageTime += shutterOpenDelay;
+            imStage = 3;
+          }
+          break;
+  
+        // Wait for the camera exposure length & end the camera trigger
+        case 3:
+          if (elapsedTime >= stageTime + cameraPulse)  {
+            digitalWrite(cameraOutput, LOW);
+            digitalWrite(indicator, LOW);
+            stageTime += cameraPulse;
+            imStage = 4;
+          }
+          break;
+  
+        case 4: // Wait for the shutter delay & close the shutter
+          if (elapsedTime >= stageTime + shutterCloseDelay)  {
+            if (!shutterStatus) digitalWrite(shutterOutput, LOW);
+            stageTime += shutterCloseDelay;
+            imStage = 5;
+          }
+        break;
+  
+        // Repeat for the required number of exposures
+        case 5:
+          if (i < e) {
+            if (elapsedTime >= stageTime + cameraDelay)  {
+              digitalWrite(shutterOutput, HIGH);
+              stageTime += cameraDelay;
+              imStage = 2;
+              i++;
+            }
+          }
+          else {
+            imStage = 1;
+            acquire = false;
+          }
+          break;
+  
+      }
+    }
+
+    // Shutter open for block
+    else if(mode != 1 && shutterMode == 2) {
+
+      switch (imStage)  {
+
+        // Open the shutter
+        case 1:
+          digitalWrite(shutterOutput, HIGH);
+          i = 1;
+          imStage = 2;
+          break;
+  
+        // Wait until the appropriate point in the breath & start the camera trigger
+        case 2:
+          if (elapsedTime >= initialDelay)  {
+            digitalWrite(cameraOutput, HIGH);
+            digitalWrite(indicator, HIGH);
+            stageTime = initialDelay;
+            imStage = 3;
+          }
+          break;
+  
+        // Wait for the camera exposure length & end the camera trigger
+        case 3:
+          if (elapsedTime >= stageTime + cameraPulse)  {
+            digitalWrite(cameraOutput, LOW);
+            digitalWrite(indicator, LOW);
+            stageTime += cameraPulse;
+            imStage = 4;
+          }
+          break;
+  
+        // Repeat for the required number of exposures
+        case 4:
+          if (i < e) {
+            if (elapsedTime >= stageTime + cameraDelay)  {
+              digitalWrite(cameraOutput, HIGH);
+              digitalWrite(indicator, HIGH);
+              stageTime += cameraDelay;
+              imStage = 3;
+              i++;
+            }
+          }
+          else {
+            if (r == imagingRepeats && !shutterStatus) digitalWrite(shutterOutput, LOW);
+            imStage = 1;
+            acquire = false;
+          }
+          break;
+            
+      }
     }
   }
 
