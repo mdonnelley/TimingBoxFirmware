@@ -12,11 +12,11 @@
 #define LED 13
 
 // Timing box BNC to variable mappings
-const int cameraOutput = OUT1;                      // Camera
-const int shutterOutput = OUT2;                     // Sutter
-const int rx1Output = OUT3;                         // Aeroneb
-const int rx2Output = OUT4;                         // Pneumatic valve
-const int inspirationInput = IN1;                   // Ventilator input
+const int cameraOutput = OUT1;                      // Camera output
+const int shutterOutput = OUT2;                     // Shutter output
+const int rx1Output = OUT3;                         // Rx1 output (i.e. Aeroneb)
+const int rx2Output = OUT4;                         // Rx2 output (i.e. Pneumatic valve)
+const int inspirationInput = IN1;                   // Inspiration input from ventilator
 const int indicator = LED;                          // LED indicator
 
 // ----------------------------------------------------------------------------------------------
@@ -32,7 +32,7 @@ int shutterCloseDelay = 15;                         // Delay before closing shut
 
 // Set block repeat options
 int imagingExposures = 1;                           // Number of camera triggers per breath
-int imagingFlats = 20;
+int imagingFlats = 20;                              // Number of flats to acquire
 int imagingRepeats = 50;                            // Number of sequential breaths for which to repeat imaging
 int imagingBlocks = 12;                             // Number of imaging blocks (should be equal to the number of elements in imagingStarts)
 int imagingStarts[100] = {
