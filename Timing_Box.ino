@@ -1,7 +1,7 @@
 #include <TimerOne.h>
 
-#define TimingBoxVersion 131
-#define BAUD 115200
+#define TimingBoxVersion 132
+#define BAUD 9600
 
 // Arduino pin to timing box BNC mappings
 #define OUT1 4
@@ -101,22 +101,22 @@ void interrupt()
 }
 
 // ----------------------------------------------------------------------------------------------
-// Send a serial parameter
+// Send a serial command
 
 void sendCommand(int parameter)
 {
   char outgoing[20];
-  sprintf(outgoing, "#0001,%.4d", parameter);
+  sprintf(outgoing, "<0001,%.4d", parameter);
   Serial.println(outgoing);
 }
 
 // ----------------------------------------------------------------------------------------------
-// Send a serial command
+// Send a serial parameter
 
 void sendParameter(int parameter, int value)
 {
   char outgoing[20];
-  sprintf(outgoing, "#0002,%.4d,%.4d", parameter, value);
+  sprintf(outgoing, "<0002,%.4d,%.4d", parameter, value);
   Serial.println(outgoing);
 }
 
@@ -140,13 +140,13 @@ void checkSerial()
 
   switch (serialStage)  {
 
-    // Error state to wait for new # for instruction start
+    // Error state to wait for new > for instruction start
     case 0:
       byteCount = 0;
       serialLength = 0;
       serialElement = 0;
       memset(serialParameters, 0, sizeof(serialParameters));  // Reset array to zero
-      if (incomingByte == 35) serialStage = 1;                // If # received then start serialStage state machine
+      if (incomingByte == 62) serialStage = 1;                // If > received then start serialStage state machine
       break;
 
     // Get serialLength to determine how many extra values to read
@@ -191,7 +191,6 @@ void decodeInstruction()
 
     // 0000: Do nothing - Use to check serial connection successful
     case 0:
-      sendParameter(0, TimingBoxVersion);
       break;
 
     // --------------- CHECKBOXES ---------------
@@ -440,6 +439,7 @@ void decodeInstruction()
       break;
 
   }
+  sendCommand(serialParameters[0]);
   instructionComplete = false;
 }
 
@@ -511,7 +511,7 @@ void selectMode()
         else digitalWrite(rx2Output, LOW);
       }
       else {
-        sendCommand(99);
+        sendCommand(55);
         mode = 3;
       }
       break;
