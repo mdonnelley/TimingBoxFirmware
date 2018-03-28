@@ -1,6 +1,6 @@
 #include <TimerOne.h>
 
-#define TimingBoxVersion 133
+#define TimingBoxVersion 137
 
 // Arduino pin to timing box BNC mappings
 #define OUT1 4
@@ -615,9 +615,8 @@ void imageAcquisitionSM()
 
       case 5: // Wait for the shutter delay & close the shutter
         if (elapsedTime >= stageTime + shutterCloseDelay)  {
-          if (!shutterStatus) {
+          if (!shutterStatus)
             digitalWrite(shutterOutput, LOW);
-          }
           imStage = 1;
           acquire = false;
         }
@@ -663,10 +662,8 @@ void imageAcquisitionSM()
 
       case 4: // Wait for the shutter delay & close the shutter
         if (elapsedTime >= stageTime + shutterCloseDelay)  {
-          if (!shutterStatus) {
+          if (!shutterStatus)
             digitalWrite(shutterOutput, LOW);
-            Serial.println("#0002,0080,0000");
-          }
           stageTime += shutterCloseDelay;
           imStage = 5;
         }
@@ -735,10 +732,8 @@ void imageAcquisitionSM()
           }
         }
         else {
-          if (r == imagingRepeats && !shutterStatus)  {
+          if (r == imagingRepeats && !shutterStatus)
             digitalWrite(shutterOutput, LOW);
-            Serial.println("#0002,0080,0000");
-          }
           imStage = 1;
           acquire = false;
         }
