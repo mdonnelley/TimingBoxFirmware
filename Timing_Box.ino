@@ -1,16 +1,13 @@
 #include <TimerOne.h>
 
-#define TimingBoxVersion 137
+#define TimingBoxVersion 140
 
 // Arduino pin to timing box BNC mappings
 #define OUT1 4
 #define OUT2 5
 #define OUT3 6
 #define OUT4 7
-#define PWM1 9
-#define PWM2 10
 #define IN1 2                                       // Interrupt 0
-#define IN2 3                                       // Interrupt 1
 
 // Timing box BNC to variable mappings
 const int cameraOutput = OUT1;                      // Camera output
@@ -24,12 +21,14 @@ const int indicator = LED_BUILTIN;                  // LED indicator
 
 #define BAUD 9600
 #define CHECK_CONNECTION 0
+
 #define INTERNAL_TRIGGER 10
 #define FORCE_SHUTTER_OPEN 11
 #define RX1_MANUAL 12
 #define RX1_ACTIVE 13
 #define RX2_MANUAL 14
 #define RX2_ACTIVE 15
+
 #define RATE 20
 #define INITIAL_DELAY 21
 #define SHUTTER_OPEN 22
@@ -38,23 +37,27 @@ const int indicator = LED_BUILTIN;                  // LED indicator
 #define SHUTTER_CLOSE 25
 #define IMAGING_EXPOSURES 26
 #define IMAGING_REPEATS 27
-#define IMAGING_FLATS 28
-#define RX1_DELAY 29
-#define RX1_PULSE 30
-#define RX1_REPEATS 31
-#define RX2_DELAY 32
-#define RX2_PULSE 33
-#define RX2_REPEATS 34
+#define IMAGING_GAP 28
+#define IMAGING_FLATS 29
+#define RX1_DELAY 30
+#define RX1_PULSE 31
+#define RX1_REPEATS 32
+#define RX2_DELAY 33
+#define RX2_PULSE 34
+#define RX2_REPEATS 35
+
 #define IMAGING_STARTS 40
 #define RX1_STARTS 41
 #define RX2_STARTS 42
-#define SHUTTER_MODE 45
-#define SEARCH 50
-#define ONE_SHOT 51
-#define ACQUIRE_ONE 52
-#define RUN 53
-#define ACQUIRE_FLATS 54
-#define STOP 55
+
+#define SHUTTER_MODE 50
+
+#define SEARCH 60
+#define ONE_SHOT 61
+#define ACQUIRE_ONE 62
+#define RUN 63
+#define ACQUIRE_FLATS 64
+#define STOP 65
 
 // ----------------------------------------------------------------------------------------------
 
@@ -71,6 +74,7 @@ int shutterCloseDelay = 15;                         // Delay before closing shut
 int imagingExposures = 1;                           // Number of camera triggers per breath
 int imagingFlats = 20;                              // Number of flats to acquire
 int imagingRepeats = 50;                            // Number of sequential breaths for which to repeat imaging
+int imagingGap = 0;                                 // Gap between images
 int imagingBlocks = 12;                             // Number of imaging blocks (should be equal to the number of elements in imagingStarts)
 int imagingStarts[100] = {
   0, 60, 120, 180, 240, 360, 480, 600, 840, 1200, 1560, 1920
@@ -338,6 +342,11 @@ void decodeInstruction()
       imagingRepeats = serialParameters[1];
       break;
 
+    // Gap between images (breaths)
+    case IMAGING_GAP:
+      imagingGap = serialParameters[1];
+      break;
+
     // Number of flat images to acquire
     case IMAGING_FLATS:
       imagingFlats = serialParameters[1];
@@ -500,7 +509,10 @@ void selectMode()
           acquire = true;                            // Start image acquisition state machine                    
           if (r > 1) {
             r--;
-            imStart++;
+            imStart+=(imagingGap+1);
+          }
+          else if (r == 0) {
+            breath = -imagingGap-1;
           }
           else {
             imBlock++;
@@ -734,6 +746,52 @@ void imageAcquisitionSM()
         else {
           if (r == imagingRepeats && !shutterStatus)
             digitalWrite(shutterOutput, LOW);
+          imStage = 1;
+          acquire = false;
+        }
+        break;
+          
+    }
+  }
+
+  // Shutter disabled
+  else if(mode != 1 && shutterMode == 3) {
+
+    switch (imStage)  {
+
+      // Wait until the appropriate point in the breath & start the camera trigger
+      case 1:
+        if (elapsedTime >= initialDelay)  {
+          digitalWrite(cameraOutput, HIGH);
+          digitalWrite(indicator, HIGH);
+          stageTime = initialDelay;
+          i = 1;
+          imStage = 2;
+        }
+        break;
+
+      // Wait for the camera exposure length & end the camera trigger
+      case 2:
+        if (elapsedTime >= stageTime + cameraPulse)  {
+          digitalWrite(cameraOutput, LOW);
+          digitalWrite(indicator, LOW);
+          stageTime += cameraPulse;
+          imStage = 3;
+        }
+        break;
+
+      // Repeat for the required number of exposures
+      case 3:
+        if (i < e) {
+          if (elapsedTime >= stageTime + cameraDelay)  {
+            digitalWrite(cameraOutput, HIGH);
+            digitalWrite(indicator, HIGH);
+            stageTime += cameraDelay;
+            imStage = 2;
+            i++;
+          }
+        }
+        else {
           imStage = 1;
           acquire = false;
         }
