@@ -1,6 +1,6 @@
 #include <TimerOne.h>
 
-#define TimingBoxVersion 140
+#define TimingBoxVersion 141
 
 // Arduino pin to timing box BNC mappings
 #define OUT1 4
@@ -102,11 +102,12 @@ boolean instructionComplete = false;
 // Image acquisition state machine variables
 boolean acquire = false, shutterStatus = LOW;
 int imBlock, imStart, imStage = 1;
-int mode = 3, i, e, r, a1, a2, stageTime;
+int mode = 3, i, e, r, stageTime;
 
 // Treatment state machine variables
 boolean rx1Deliver = true, rx1Active = false, rx2Deliver = true, rx2Active = false;
 int rx1Block, rx1Start, rx1Stage = 1, rx2Block, rx2Start, rx2Stage = 1;
+int a1, a2;
 
 // ----------------------------------------------------------------------------------------------
 
@@ -131,12 +132,14 @@ void setup()
 }
 
 // ----------------------------------------------------------------------------------------------
- // Record the time of inspiration and increment the breath counter
+ // Record the time of inspiration and increment the breath counter (if not acquiring)
  
 void interrupt()
 {
-  inspTime = millis();
-  breath++;
+  if (!acquire) {
+    inspTime = millis();
+    breath++;
+  }
 }
 
 // ----------------------------------------------------------------------------------------------
