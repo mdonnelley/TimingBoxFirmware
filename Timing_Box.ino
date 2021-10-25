@@ -304,7 +304,7 @@ void decodeInstruction()
     // --------------- NUMERIC UP/DOWN BOXES ---------------
 
     // Cycle rate (in msec) for free breathing (no external trigger)
-    // Note that the maximum cycle length is 8388.608mS (8.3 seconds)
+    // Note that the maximum cycle length is 8388.608mS (8.3 seconds) with prescale 1024
     case RATE:
       rate = serialParameters[1];
       Timer1.setPeriod(rate * 1000);
