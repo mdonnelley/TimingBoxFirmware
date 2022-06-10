@@ -1,12 +1,13 @@
 #include <TimerOne.h>
 
-#define TimingBoxVersion 141
+#define TimingBoxVersion 150
 
 // Arduino pin to timing box BNC mappings
 #define OUT1 4
 #define OUT2 5
 #define OUT3 6
 #define OUT4 7
+#define OUT5 8
 #define IN1 2                                       // Interrupt 0
 
 // Timing box BNC to variable mappings
@@ -14,6 +15,7 @@ const int cameraOutput = OUT1;                      // Camera output
 const int shutterOutput = OUT2;                     // Shutter output
 const int rx1Output = OUT3;                         // Rx1 output (i.e. Aeroneb)
 const int rx2Output = OUT4;                         // Rx2 output (i.e. Pneumatic valve)
+const int relay = OUT5;                             // Relay output
 const int inspirationInput = IN1;                   // Inspiration input from ventilator
 const int indicator = LED_BUILTIN;                  // LED indicator
 
@@ -28,6 +30,7 @@ const int indicator = LED_BUILTIN;                  // LED indicator
 #define RX1_ACTIVE 13
 #define RX2_MANUAL 14
 #define RX2_ACTIVE 15
+#define RELAY_ACTIVE 16
 
 #define RATE 20
 #define INITIAL_DELAY 21
@@ -105,7 +108,7 @@ int imBlock, imStart, imStage = 1;
 int mode = 3, i, e, r, stageTime;
 
 // Treatment state machine variables
-boolean rx1Deliver = true, rx1Active = false, rx2Deliver = true, rx2Active = false;
+boolean rx1Deliver = true, rx1Active = false, rx2Deliver = true, rx2Active = false, rx2Relay = false;
 int rx1Block, rx1Start, rx1Stage = 1, rx2Block, rx2Start, rx2Stage = 1;
 int a1, a2;
 
@@ -285,12 +288,14 @@ void decodeInstruction()
     case RX2_MANUAL:
       if (serialParameters[1]) {
         digitalWrite(rx2Output, HIGH);
+        if (rx2Relay) digitalWrite(relay, HIGH);
         a2 = rx2Repeats;
         rx2Block = 0;
         rx2Start = breath;
       }
       else {
         digitalWrite(rx2Output, LOW);
+        digitalWrite(relay, LOW);
         rx2Block = rx2Blocks;
       }
       break;
@@ -299,6 +304,12 @@ void decodeInstruction()
     case RX2_ACTIVE:
       if (serialParameters[1]) rx2Deliver = true;
       else rx2Deliver = false;
+      break;
+
+    // Schedule Relay to function with Rx2
+    case RELAY_ACTIVE:
+      if (serialParameters[1]) rx2Relay = true;
+      else rx2Relay = false;
       break;
 
     // --------------- NUMERIC UP/DOWN BOXES ---------------
@@ -478,6 +489,7 @@ void decodeInstruction()
       if (!shutterStatus) digitalWrite(shutterOutput, LOW);
       digitalWrite(rx1Output, LOW);
       digitalWrite(rx2Output, LOW);
+      digitalWrite(relay, LOW);
       digitalWrite(cameraOutput, LOW);
       digitalWrite(indicator, LOW);
       imStage = 1;
@@ -558,7 +570,10 @@ void selectMode()
             }
           }
         }
-        else digitalWrite(rx2Output, LOW);
+        else {
+          digitalWrite(rx2Output, LOW);
+          digitalWrite(relay, LOW);
+        }
       }
       else {
         sendCommand(55);
@@ -844,7 +859,8 @@ void rx2SM()
     // Wait until the appropriate point in the breath & activate
     case 1:
       if (elapsedTime >= rx2Delay)  {
-        digitalWrite(rx2Output, HIGH);  
+        digitalWrite(rx2Output, HIGH);
+        if (rx2Relay) digitalWrite(relay, HIGH);
         rx2Stage = 2;
       }
       break;
@@ -853,6 +869,7 @@ void rx2SM()
     case 2:
       if (elapsedTime >= rx2Delay + rx2Pulse)  {
         digitalWrite(rx2Output, LOW);
+        digitalWrite(relay, LOW);
         rx2Stage = 1;
         rx2Active = false;
       }
