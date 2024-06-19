@@ -1,6 +1,7 @@
 #include <TimerOne.h>
+#include <limits.h>
 
-#define TimingBoxVersion 150
+#define TimingBoxVersion 151
 
 // Arduino pin to timing box BNC mappings
 #define OUT1 4
@@ -103,12 +104,13 @@ int byteCount, arrayCount, serialElement = 0, serialLength = 0, serialParameters
 boolean instructionComplete = false;
 
 // Image acquisition state machine variables
-boolean acquire = false, shutterStatus = LOW;
+boolean acquire = false, shutterStatus = false;
 int imBlock, imStart, imStage = 1;
 int mode = 3, i, e, r, stageTime;
 
 // Treatment state machine variables
-boolean rx1Deliver = true, rx1Active = false, rx2Deliver = true, rx2Active = false, rx2Relay = false;
+boolean rx1Deliver = true, rx1Active = false, rx1Status = false;
+boolean rx2Deliver = true, rx2Active = false, rx2Status = false, rx2Relay = false;
 int rx1Block, rx1Start, rx1Stage = 1, rx2Block, rx2Start, rx2Stage = 1;
 int a1, a2;
 
@@ -125,6 +127,7 @@ void setup()
   pinMode(shutterOutput, OUTPUT);
   pinMode(rx1Output, OUTPUT);
   pinMode(rx2Output, OUTPUT);
+  pinMode(relay, OUTPUT);
   pinMode(indicator, OUTPUT);
   pinMode(inspirationInput, INPUT_PULLUP);
 
@@ -135,7 +138,7 @@ void setup()
 }
 
 // ----------------------------------------------------------------------------------------------
- // Record the time of inspiration and increment the breath counter (if not acquiring)
+// Record the time of inspiration and increment the breath counter (if not acquiring)
  
 void interrupt()
 {
@@ -254,28 +257,16 @@ void decodeInstruction()
 
     // Force shutter open / normal shuttering
     case FORCE_SHUTTER_OPEN:
-      if (serialParameters[1]) {
-        shutterStatus = HIGH;
-        digitalWrite(shutterOutput, shutterStatus);
-      }
-      else {
-        shutterStatus = LOW;
-        digitalWrite(shutterOutput, shutterStatus);
-      }
+      if (serialParameters[1]) shutterStatus = true;
+      else shutterStatus = false;
+      digitalWrite(shutterOutput, shutterStatus);
       break;
 
     // Rx1 on/off manual
     case RX1_MANUAL:
-      if (serialParameters[1]) {
-        digitalWrite(rx1Output, HIGH);
-        a1 = rx1Repeats;
-        rx1Block = 0;
-        rx1Start = breath;
-      }
-      else {
-        digitalWrite(rx1Output, LOW);
-        rx1Block = rx1Blocks;
-      }
+      if (serialParameters[1]) rx1Status = true;
+      else rx1Status = false;
+      digitalWrite(rx1Output, rx1Status);
       break;
 
     // Schedule Rx1 to deliver on script run
@@ -286,18 +277,10 @@ void decodeInstruction()
 
     // Rx2 on/off manual
     case RX2_MANUAL:
-      if (serialParameters[1]) {
-        digitalWrite(rx2Output, HIGH);
-        if (rx2Relay) digitalWrite(relay, HIGH);
-        a2 = rx2Repeats;
-        rx2Block = 0;
-        rx2Start = breath;
-      }
-      else {
-        digitalWrite(rx2Output, LOW);
-        digitalWrite(relay, LOW);
-        rx2Block = rx2Blocks;
-      }
+      if (serialParameters[1]) rx2Status = true;
+      else rx2Status = false;
+      digitalWrite(rx2Output, rx2Status);
+      if (rx2Relay) digitalWrite(relay, rx2Status);
       break;
 
     // Schedule Rx2 to deliver on script run
@@ -310,6 +293,7 @@ void decodeInstruction()
     case RELAY_ACTIVE:
       if (serialParameters[1]) rx2Relay = true;
       else rx2Relay = false;
+      if (rx2Status) digitalWrite(relay, rx2Relay);
       break;
 
     // --------------- NUMERIC UP/DOWN BOXES ---------------
@@ -354,6 +338,7 @@ void decodeInstruction()
     // Number of sequential breaths for which to repeat imaging
     case IMAGING_REPEATS:
       imagingRepeats = serialParameters[1];
+      if(imagingRepeats==0) imagingRepeats = INT_MAX;
       break;
 
     // Gap between images (breaths)
@@ -379,6 +364,7 @@ void decodeInstruction()
     // Number of sequential breaths for which to repeat Rx1 delivery in each block
     case RX1_REPEATS:
       rx1Repeats = serialParameters[1];
+      if(rx1Repeats==0) rx1Repeats = INT_MAX;
       break;
 
     // Rx2 delay to appropriate point in breath (in msec)
@@ -394,6 +380,7 @@ void decodeInstruction()
     // Number of sequential breaths for which to repeat Rx2 delivery in each block
     case RX2_REPEATS:
       rx2Repeats = serialParameters[1];
+      if(rx2Repeats==0) rx2Repeats = INT_MAX;
       break;
 
     // --------------- TEXT BOXES ---------------
@@ -438,8 +425,8 @@ void decodeInstruction()
       r = 1;
       imBlock = imagingBlocks - 1;
       imStart = 0;
-      rx1Block = rx1Blocks;  // Added to ensure the aerosol/insufflation code is never executed
-      rx2Block = rx2Blocks;  // Added to ensure the aerosol/insufflation code is never executed
+      rx1Block = rx1Blocks;  // Added to ensure that Rx1 is not activated for One Shot
+      rx2Block = rx2Blocks;  // Added to ensure that Rx2 is not activated for One Shot
       mode = 2;
       breath = -1;
       break;
@@ -450,8 +437,8 @@ void decodeInstruction()
       r = imagingRepeats;
       imBlock = imagingBlocks - 1;
       imStart = 0;
-      rx1Block = rx1Blocks;
-      rx2Block = rx2Blocks;
+      rx1Block = rx1Blocks;  // Added to ensure that Rx1 is not activated for One Block
+      rx2Block = rx2Blocks;  // Added to ensure that Rx2 is not activated for One Block
       mode = 2;
       breath = -1;
       break;
@@ -487,9 +474,11 @@ void decodeInstruction()
     // Stop all
     case STOP:
       if (!shutterStatus) digitalWrite(shutterOutput, LOW);
-      digitalWrite(rx1Output, LOW);
-      digitalWrite(rx2Output, LOW);
-      digitalWrite(relay, LOW);
+      if (!rx1Status) digitalWrite(rx1Output, LOW);
+      if (!rx2Status) {
+        digitalWrite(rx2Output, LOW);
+        digitalWrite(relay, LOW);
+      }
       digitalWrite(cameraOutput, LOW);
       digitalWrite(indicator, LOW);
       imStage = 1;
@@ -525,9 +514,6 @@ void selectMode()
           if (r > 1) {
             r--;
             imStart+=(imagingGap+1);
-          }
-          else if (r == 0) {
-            breath = -imagingGap-1;
           }
           else {
             imBlock++;
@@ -571,8 +557,8 @@ void selectMode()
           }
         }
         else {
-          digitalWrite(rx2Output, LOW);
-          digitalWrite(relay, LOW);
+          if (!rx2Status) digitalWrite(rx2Output, LOW);
+          if (!rx2Status && rx2Relay) digitalWrite(relay, LOW);
         }
       }
       else {
@@ -645,8 +631,7 @@ void imageAcquisitionSM()
 
       case 5: // Wait for the shutter delay & close the shutter
         if (elapsedTime >= stageTime + shutterCloseDelay)  {
-          if (!shutterStatus)
-            digitalWrite(shutterOutput, LOW);
+          if (!shutterStatus) digitalWrite(shutterOutput, LOW);
           imStage = 1;
           acquire = false;
         }
@@ -692,8 +677,7 @@ void imageAcquisitionSM()
 
       case 4: // Wait for the shutter delay & close the shutter
         if (elapsedTime >= stageTime + shutterCloseDelay)  {
-          if (!shutterStatus)
-            digitalWrite(shutterOutput, LOW);
+          if (!shutterStatus) digitalWrite(shutterOutput, LOW);
           stageTime += shutterCloseDelay;
           imStage = 5;
         }
@@ -762,8 +746,7 @@ void imageAcquisitionSM()
           }
         }
         else {
-          if (r == imagingRepeats && !shutterStatus)
-            digitalWrite(shutterOutput, LOW);
+          if (r == imagingRepeats && !shutterStatus) digitalWrite(shutterOutput, LOW);
           imStage = 1;
           acquire = false;
         }
@@ -839,7 +822,7 @@ void rx1SM()
     // Wait for the delivery time
     case 2:
       if (elapsedTime >= rx1Delay + rx1Pulse)  {
-        digitalWrite(rx1Output, LOW);
+        if (!rx1Status) digitalWrite(rx1Output, LOW);
         rx1Stage = 1;
         rx1Active = false;
       }
@@ -868,8 +851,8 @@ void rx2SM()
     // Wait for the delivery time
     case 2:
       if (elapsedTime >= rx2Delay + rx2Pulse)  {
-        digitalWrite(rx2Output, LOW);
-        digitalWrite(relay, LOW);
+        if (!rx2Status) digitalWrite(rx2Output, LOW);
+        if (!rx2Status && rx2Relay) digitalWrite(relay, LOW);
         rx2Stage = 1;
         rx2Active = false;
       }
